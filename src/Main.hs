@@ -6,8 +6,11 @@ import Network.Wreq
 import Control.Lens
 import qualified Data.ByteString.Lazy.Char8 as Char8
 import System.Environment
-import Text.HTML.TagSoup
+--     http://hackage.haskell.org/package/tagsoup 
+import Text.HTML.TagSoup(parseTags) 
+--     http://hackage.haskell.org/package/megaparsec 
 import Text.Megaparsec
+--     http://hackage.haskell.org/package/tagsoup-megaparsec 
 import Text.Megaparsec.TagSoup
 
 main :: IO ()
