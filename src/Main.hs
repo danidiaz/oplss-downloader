@@ -13,12 +13,20 @@ import Text.Megaparsec
 --     http://hackage.haskell.org/package/tagsoup-megaparsec 
 import Text.Megaparsec.TagSoup
 
+data Course = Course 
+            {
+              name :: Char8.ByteString
+            , videoURLs :: [Char8.ByteString]  
+            } deriving (Show)
+ 
 main :: IO ()
 main = do 
     target : [] <- getArgs
     r <- get "https://www.cs.uoregon.edu/research/summerschool/summer12/curriculum.html"
     let tags = parseTags $ r ^. responseBody
-    --Char8.putStrLn $ r ^. responseBody
+        parser :: TagParser Char8.ByteString [Course]
+        parser = return []
+        parseResult = parse parser "" tags
     print tags 
     putStrLn $ "writing to folder " ++ target
 
