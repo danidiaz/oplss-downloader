@@ -1,4 +1,5 @@
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE LambdaCase #-}
 
 module Main where
 
@@ -7,9 +8,9 @@ import Control.Lens
 import qualified Data.ByteString.Lazy.Char8 as Char8
 import System.Environment
 --     http://hackage.haskell.org/package/tagsoup 
-import Text.HTML.TagSoup(parseTags) 
+import Text.HTML.TagSoup
 --     http://hackage.haskell.org/package/megaparsec 
-import Text.Megaparsec
+import Text.Megaparsec hiding (satisfy)
 --     http://hackage.haskell.org/package/tagsoup-megaparsec 
 import Text.Megaparsec.TagSoup
 
@@ -25,8 +26,16 @@ main = do
     r <- get "https://www.cs.uoregon.edu/research/summerschool/summer12/curriculum.html"
     let tags = parseTags $ r ^. responseBody
         parser :: TagParser Char8.ByteString [Course]
-        parser = return []
+        parser = do
+            skipMany (satisfy isCourseOpen)
+            many course 
+            return []
         parseResult = parse parser "" tags
     print tags 
     putStrLn $ "writing to folder " ++ target
-
+    where
+    isCourseOpen = \case
+        TagOpen "p" [("class","coursetitle")] -> True
+        otherwise -> False
+    course = do
+        return ()
