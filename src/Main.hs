@@ -1,5 +1,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE ApplicativeDo #-}
+{-# LANGUAGE RecordWildCards #-}
 
 module Main where
 
@@ -16,26 +18,57 @@ import Text.Megaparsec.TagSoup
 
 data Course = Course 
             {
-              name :: Char8.ByteString
-            , videoURLs :: [Char8.ByteString]  
+              title :: Char8.ByteString
+            , lectures :: [Lecture]  
             } deriving (Show)
+
+data Lecture = Lecture
+             {
+               lectureName :: Char8.ByteString
+             , videoURLs :: [Char8.ByteString]  
+             } deriving (Show)
  
+parser :: TagParser Char8.ByteString [Course]
+parser = do
+    skipMany (satisfy (not . isCourseTitleOpen))
+    many course 
+    where
+    course = do
+        satisfy isCourseTitleOpen
+        tagText
+        tagOpen "a"
+        TagText title <- tagText
+        tagClose "a"
+        tagClose "p" 
+        satisfy isCourseDescOpen
+        tagOpen "ul"
+        lectures <- many lecture
+        tagClose "ul"
+        tagClose "p" 
+        pure (Course {..})
+    lecture = do
+        tagOpen "li"
+        TagText lectureName <- tagText
+        videoURLs <- many video
+        tagClose "li"
+        pure (Lecture {..})
+    video = do
+        TagOpen _ [("href",href)] <- tagOpen "a" 
+        TagText link <- tagText    
+        tagClose "a"
+        pure link
+    isCourseTitleOpen = \case
+        TagOpen "p" [("class","coursetitle")] -> True
+        otherwise -> False
+    isCourseDescOpen = \case
+        TagOpen "p" [("class","coursedesc")] -> True
+        otherwise -> False
+
 main :: IO ()
 main = do 
     target : [] <- getArgs
     r <- get "https://www.cs.uoregon.edu/research/summerschool/summer12/curriculum.html"
     let tags = parseTags $ r ^. responseBody
-        parser :: TagParser Char8.ByteString [Course]
-        parser = do
-            skipMany (satisfy isCourseOpen)
-            many course 
-            return []
         parseResult = parse parser "" tags
-    print tags 
+    print parseResult 
     putStrLn $ "writing to folder " ++ target
-    where
-    isCourseOpen = \case
-        TagOpen "p" [("class","coursetitle")] -> True
-        otherwise -> False
-    course = do
-        return ()
