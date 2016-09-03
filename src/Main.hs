@@ -6,6 +6,8 @@
 module Main where
 
 import Network.Wreq
+import Control.Applicative
+import Control.Monad
 import Control.Lens
 import qualified Data.ByteString.Lazy.Char8 as Char8
 import System.Environment
@@ -15,6 +17,8 @@ import Text.HTML.TagSoup
 import Text.Megaparsec hiding (satisfy)
 --     http://hackage.haskell.org/package/tagsoup-megaparsec 
 import Text.Megaparsec.TagSoup
+
+type TagParserT str m = ParsecT Dec [Tag str] m
 
 data Course = Course 
             {
@@ -41,6 +45,7 @@ parser = do
         tagClose "a"
         tagClose "p" 
         satisfy isCourseDescOpen
+        skipTillVideoStart
         tagOpen "ul"
         lectures <- many lecture
         tagClose "ul"
@@ -63,6 +68,13 @@ parser = do
     isCourseDescOpen = \case
         TagOpen "p" [("class","coursedesc")] -> True
         otherwise -> False
+    videoStart = do
+        tagOpen "li"
+        tagText 
+        vlink <- video
+        guard (Char8.isSuffixOf "mp4" vlink)  
+    skipTillVideoStart = do
+        skipMany (anyTag *> notFollowedBy videoStart)     
 
 main :: IO ()
 main = do 
@@ -70,5 +82,6 @@ main = do
     r <- get "https://www.cs.uoregon.edu/research/summerschool/summer12/curriculum.html"
     let tags = parseTags $ r ^. responseBody
         parseResult = parse parser "" tags
+    print $ zip [1..] tags
     print parseResult 
     putStrLn $ "writing to folder " ++ target
