@@ -28,6 +28,7 @@ executable oplss-downloader
                        async >= 2.1.0,
                        lens,
                        bytestring, 
+                       transformers >= 0.5,
                        filepath >= 1.4.0.0
                 
   hs-source-dirs:      src

@@ -1,5 +1,6 @@
 dist
 cabal-dev
+Session.vim
 *.o
 *.hi
 *.chi
