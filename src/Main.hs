@@ -115,10 +115,18 @@ parser = do
 type RelativeURL = Char8.ByteString
 
 prepareCourseTarget :: FilePath -> Course -> IO [(FilePath,RelativeURL)]
-prepareCourseTarget = undefined
+prepareCourseTarget basepath course = do
+    let coursePath = basepath </> nospaces (title course) 
+    createDirectory coursePath
+    concat <$> traverse (prepareLectureTarget coursePath) (lectures course)
 
 prepareLectureTarget :: FilePath -> Lecture -> IO [(FilePath,RelativeURL)]
-prepareLectureTarget = undefined
+prepareLectureTarget basepath lect = do
+    let lecturePath = basepath </> nospaces (lectureName lect) 
+    createDirectory lecturePath
+    --
+    --
+    return undefined
 
 main :: IO ()
 main = do 
