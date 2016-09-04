@@ -16,6 +16,7 @@ import Control.Monad
 import Control.Monad.Trans.Class
 import Control.Monad.Trans.Writer
 import Control.Lens
+import Control.Exception(throwIO)
 import qualified Data.ByteString.Lazy.Char8 as Char8
 import System.Environment
 --     http://hackage.haskell.org/package/tagsoup 
@@ -24,6 +25,10 @@ import Text.HTML.TagSoup
 import Text.Megaparsec hiding (satisfy)
 --     http://hackage.haskell.org/package/tagsoup-megaparsec 
 import Text.Megaparsec.TagSoup
+--     http://hackage.haskell.org/package/directory
+import System.Directory 
+import System.FilePath
+import System.IO
 
 type TagParserT str m = ParsecT Dec [Tag str] m
 
@@ -57,6 +62,9 @@ cleanup = Char8.dropWhile isSpace
         . head 
         . Char8.lines 
         . Char8.dropWhile isSpace 
+
+nospaces :: Char8.ByteString -> FilePath
+nospaces = Char8.unpack . Char8.intercalate "_" . Char8.split ' '
 
 parser :: MonadDebug m => TagParserT Char8.ByteString m [Course]
 parser = do
@@ -104,6 +112,14 @@ parser = do
         guard (Char8.isSuffixOf "mp4" vlink)  
     skipTillVideoStart = skipMany (try (anyTag *> notFollowedBy videoStart))
 
+type RelativeURL = Char8.ByteString
+
+prepareCourseTarget :: FilePath -> Course -> IO [(FilePath,RelativeURL)]
+prepareCourseTarget = undefined
+
+prepareLectureTarget :: FilePath -> Lecture -> IO [(FilePath,RelativeURL)]
+prepareLectureTarget = undefined
+
 main :: IO ()
 main = do 
     target : [] <- getArgs
@@ -112,5 +128,13 @@ main = do
         (parseResult, messages :: [DebugMessage]) = runWriter (runParserT parser "" tags)
     -- print $ zip [1..] tags
     -- print $ messages
-    print $ parseResult
-    putStrLn $ "writing to folder " ++ target
+    case parseResult of
+        Left  err    -> print err
+        Right result -> do
+            targetExists <- doesDirectoryExist target
+            if not targetExists
+            then throwIO (userError "target folder doesn't exist") 
+            else do _ <- concat <$> traverse (prepareCourseTarget target) result 
+                    return () 
+            putStrLn $ "writing to folder " ++ target
+
