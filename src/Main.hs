@@ -16,7 +16,7 @@ import Control.Monad
 import Control.Monad.Trans.Class
 import Control.Monad.Trans.Writer
 import Control.Lens
-import Control.Exception(throwIO)
+import Control.Exception(throwIO,bracket_)
 import qualified Data.ByteString.Lazy.Char8 as Char8
 import System.Environment
 --     http://hackage.haskell.org/package/tagsoup 
@@ -27,7 +27,10 @@ import Text.Megaparsec hiding (satisfy)
 import Text.Megaparsec.TagSoup
 --     http://hackage.haskell.org/package/directory
 import System.Directory 
+--     http://hackage.haskell.org/package/filepath
 import System.FilePath
+import Control.Concurrent.QSem
+import Control.Concurrent.Async
 import System.IO
 
 type TagParserT str m = ParsecT Dec [Tag str] m
@@ -117,20 +120,38 @@ type RelativeURL = Char8.ByteString
 prepareCourseTarget :: FilePath -> Course -> IO [(FilePath,RelativeURL)]
 prepareCourseTarget basepath course = do
     let coursePath = basepath </> nospaces (title course) 
-    createDirectory coursePath
+    exists <- doesDirectoryExist coursePath
+    unless exists $ createDirectory coursePath
     concat <$> traverse (prepareLectureTarget coursePath) (lectures course)
 
 prepareLectureTarget :: FilePath -> Lecture -> IO [(FilePath,RelativeURL)]
 prepareLectureTarget basepath lect = do
     let lecturePath = basepath </> nospaces (lectureName lect) 
-    createDirectory lecturePath
-    --
-    --
-    return undefined
+    exists <- doesDirectoryExist lecturePath
+    unless exists $ createDirectory lecturePath
+    return $ map (\relurl -> (fullpath lecturePath relurl,relurl)) (videoURLs lect)
+    where 
+    fullpath folder relurl = folder </> takeFileName (Char8.unpack relurl) 
+
+traverseThrottled :: Traversable t => Int -> (a -> IO b) -> t a -> IO (t b) 
+traverseThrottled concLevel action taskContainer = do
+    sem <- newQSem concLevel
+    let throttledAction = bracket_ (waitQSem sem) (signalQSem sem) . action
+    runConcurrently (traverse (Concurrently . throttledAction) taskContainer)
+
+download :: String -> (FilePath,RelativeURL) -> IO ()
+download base (targetfile,relurl) = do
+    let absurl = base ++ Char8.unpack relurl
+    exists <- doesFileExist targetfile
+    unless exists $ do
+        putStrLn $ "starting download of file " ++ targetfile
+        putStrLn $ "from url " ++ absurl
+        putStrLn $ "ended download of file " ++ targetfile
 
 main :: IO ()
 main = do 
     target : [] <- getArgs
+    let baseURL = "https://www.cs.uoregon.edu/research/summerschool/summer12/"
     r <- get "https://www.cs.uoregon.edu/research/summerschool/summer12/curriculum.html"
     let tags = parseTags $ r ^. responseBody
         (parseResult, messages :: [DebugMessage]) = runWriter (runParserT parser "" tags)
@@ -142,7 +163,7 @@ main = do
             targetExists <- doesDirectoryExist target
             if not targetExists
             then throwIO (userError "target folder doesn't exist") 
-            else do _ <- concat <$> traverse (prepareCourseTarget target) result 
-                    return () 
+            else do rs <- concat <$> traverse (prepareCourseTarget target) result 
+                    mapConcurrently (download baseURL) rs
             putStrLn $ "writing to folder " ++ target
 
