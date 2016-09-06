@@ -164,6 +164,6 @@ main = do
             if not targetExists
             then throwIO (userError "target folder doesn't exist") 
             else do rs <- concat <$> traverse (prepareCourseTarget target) result 
-                    mapConcurrently (download baseURL) rs
+                    traverseThrottled 2 (download baseURL) rs
             putStrLn $ "writing to folder " ++ target
 
