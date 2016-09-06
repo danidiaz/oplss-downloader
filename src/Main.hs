@@ -16,8 +16,10 @@ import Control.Monad
 import Control.Monad.Trans.Class
 import Control.Monad.Trans.Writer
 import Control.Lens
-import Control.Exception(throwIO,bracket_)
+import Control.Exception(throwIO,bracket_,onException)
 import qualified Data.ByteString.Lazy.Char8 as Char8
+--     http://hackage.haskell.org/package/bytestring
+import qualified Data.ByteString as Bytes
 import System.Environment
 --     http://hackage.haskell.org/package/tagsoup 
 import Text.HTML.TagSoup
@@ -30,6 +32,7 @@ import System.Directory
 --     http://hackage.haskell.org/package/filepath
 import System.FilePath
 import Control.Concurrent.QSem
+import Control.Concurrent.MVar
 import Control.Concurrent.Async
 import System.IO
 
@@ -122,7 +125,7 @@ prepareCourseTarget basepath course = do
     let coursePath = basepath </> nospaces (title course) 
     exists <- doesDirectoryExist coursePath
     unless exists $ createDirectory coursePath
-    concat <$> traverse (prepareLectureTarget coursePath) (lectures course)
+    foldMap (prepareLectureTarget coursePath) (lectures course)
 
 prepareLectureTarget :: FilePath -> Lecture -> IO [(FilePath,RelativeURL)]
 prepareLectureTarget basepath lect = do
@@ -139,22 +142,37 @@ traverseThrottled concLevel action taskContainer = do
     let throttledAction = bracket_ (waitQSem sem) (signalQSem sem) . action
     runConcurrently (traverse (Concurrently . throttledAction) taskContainer)
 
-download :: String -> (FilePath,RelativeURL) -> IO ()
-download base (targetfile,relurl) = do
+type Notifier = String -> IO ()
+
+type BaseURL = String
+
+createNotifier :: IO Notifier
+createNotifier = do
+    latch <- newMVar ()
+    return $ \msg -> withMVar latch $ \() -> putStrLn msg
+
+download :: Notifier -> BaseURL -> (FilePath,RelativeURL) -> IO ()
+download notify base (file,relurl) = do
     let absurl = base ++ Char8.unpack relurl
-    exists <- doesFileExist targetfile
+    exists <- doesFileExist file
     unless exists $ do
-        putStrLn $ "starting download of file " ++ targetfile
-        putStrLn $ "from url " ++ absurl
-        putStrLn $ "ended download of file " ++ targetfile
+        notify $ "starting download of file " ++ file
+        notify $ "from url " ++ absurl
+        do (withFile file WriteMode $ \h -> foldGet (consume h) () absurl) 
+           `onException`
+                (do exists <- doesFileExist file
+                    when exists (removeFile file))
+        notify $ "ended download of file " ++ file
+    where
+    consume handle () bytes = Bytes.hPut handle bytes  
 
 main :: IO ()
 main = do 
     target : [] <- getArgs
     let baseURL = "https://www.cs.uoregon.edu/research/summerschool/summer12/"
-    r <- get "https://www.cs.uoregon.edu/research/summerschool/summer12/curriculum.html"
+    r <- get $ baseURL ++ "curriculum.html"
     let tags = parseTags $ r ^. responseBody
-        (parseResult, messages :: [DebugMessage]) = runWriter (runParserT parser "" tags)
+        (parseResult, _ :: [DebugMessage]) = runWriter (runParserT parser "" tags)
     -- print $ zip [1..] tags
     -- print $ messages
     case parseResult of
@@ -163,7 +181,8 @@ main = do
             targetExists <- doesDirectoryExist target
             if not targetExists
             then throwIO (userError "target folder doesn't exist") 
-            else do rs <- concat <$> traverse (prepareCourseTarget target) result 
-                    traverseThrottled 2 (download baseURL) rs
-            putStrLn $ "writing to folder " ++ target
-
+            else do rs <- foldMap (prepareCourseTarget target) result 
+                    putStrLn $ "writing to folder " ++ target
+                    notify <- createNotifier
+                    traverseThrottled 2 (download notify baseURL) rs
+                    return ()
