@@ -120,18 +120,18 @@ parser = do
 
 type RelativeURL = Char8.ByteString
 
-prepareCourseTarget :: FilePath -> Course -> IO [(FilePath,RelativeURL)]
-prepareCourseTarget basepath course = do
+prepareCourseTarget :: (FilePath -> IO ()) -> FilePath -> Course -> IO [(FilePath,RelativeURL)]
+prepareCourseTarget whenNotExists basepath course = do
     let coursePath = basepath </> nospaces (title course) 
     exists <- doesDirectoryExist coursePath
-    unless exists $ createDirectory coursePath
-    foldMap (prepareLectureTarget coursePath) (lectures course)
+    unless exists $ whenNotExists coursePath
+    foldMap (prepareLectureTarget whenNotExists coursePath) (lectures course)
 
-prepareLectureTarget :: FilePath -> Lecture -> IO [(FilePath,RelativeURL)]
-prepareLectureTarget basepath lect = do
+prepareLectureTarget :: (FilePath -> IO ()) -> FilePath -> Lecture -> IO [(FilePath,RelativeURL)]
+prepareLectureTarget whenNotExists basepath lect = do
     let lecturePath = basepath </> nospaces (lectureName lect) 
     exists <- doesDirectoryExist lecturePath
-    unless exists $ createDirectory lecturePath
+    unless exists $ whenNotExists lecturePath
     return $ map (\relurl -> (fullpath lecturePath relurl,relurl)) (videoURLs lect)
     where 
     fullpath folder relurl = folder </> takeFileName (Char8.unpack relurl) 
@@ -154,21 +154,31 @@ createNotifier = do
 download :: Notifier -> BaseURL -> (FilePath,RelativeURL) -> IO ()
 download notify base (file,relurl) = do
     let absurl = base ++ Char8.unpack relurl
-    exists <- doesFileExist file
-    unless exists $ do
-        notify $ "starting download of file " ++ file
-        notify $ "from url " ++ absurl
-        do (withFile file WriteMode $ \h -> foldGet (consume h) () absurl) 
-           `onException`
-                (do exists <- doesFileExist file
-                    when exists (removeFile file))
-        notify $ "ended download of file " ++ file
+    existsFolder <- doesDirectoryExist (takeDirectory file)
+    when existsFolder $ do -- do nothing if we deleted the sub-folder
+        exists <- doesFileExist file
+        unless exists $ do
+            notify $ "starting download of file " ++ file
+            notify $ "from url " ++ absurl
+            do (withFile file WriteMode $ \h -> foldGet (consume h) () absurl) 
+               `onException`
+                    (do exists <- doesFileExist file
+                        when exists (removeFile file))
+            notify $ "ended download of file " ++ file
     where
     consume handle () bytes = Bytes.hPut handle bytes  
 
+data Mode = Prepare
+          | Download
+
+parseMode :: String -> Mode
+parseMode "prepare" = Prepare
+parseMode "download" = Download
+parseMode unknown = error $ "unknown mode " ++ unknown
+
 main :: IO ()
 main = do 
-    target : [] <- getArgs
+    (parseMode -> mode) : target : [] <- getArgs
     let baseURL = "https://www.cs.uoregon.edu/research/summerschool/summer12/"
     r <- get $ baseURL ++ "curriculum.html"
     let tags = parseTags $ r ^. responseBody
@@ -181,8 +191,13 @@ main = do
             targetExists <- doesDirectoryExist target
             if not targetExists
             then throwIO (userError "target folder doesn't exist") 
-            else do rs <- foldMap (prepareCourseTarget target) result 
-                    putStrLn $ "writing to folder " ++ target
-                    notify <- createNotifier
-                    traverseThrottled 2 (download notify baseURL) rs
-                    return ()
+            else case mode of
+                    Prepare  -> do
+                        foldMap (prepareCourseTarget createDirectory target) result 
+                        putStrLn $ "writing to folder " ++ target
+                        putStrLn $ "delete the sub-folders you are not interested in"
+                    Download -> do
+                        rs <- foldMap (prepareCourseTarget (\_ -> return ()) target) result 
+                        notify <- createNotifier
+                        traverseThrottled 2 (download notify baseURL) rs
+                        return ()
