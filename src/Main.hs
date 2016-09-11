@@ -68,14 +68,6 @@ data Lecture = Lecture
              , videoURLs :: [String]  
              } deriving (Show)
  
-cleanup :: Char8.ByteString -> Char8.ByteString 
-cleanup = Char8.dropWhile isSpace 
-        . head 
-        . Char8.lines 
-        . Char8.dropWhile isSpace 
-
-nospaces :: Char8.ByteString -> FilePath
-nospaces = Char8.unpack . Char8.intercalate "_" . Char8.split ' '
 
 parser :: MonadDebug m => (String -> String) -> TagParserT Char8.ByteString m [Course]
 parser unpackURL = do
@@ -122,6 +114,11 @@ parser unpackURL = do
         vlink <- video
         guard (Char8.isSuffixOf "mp4" vlink)  
     skipTillVideoStart = skipMany (try (anyTag *> notFollowedBy videoStart))
+    cleanup :: Char8.ByteString -> Char8.ByteString 
+    cleanup = Char8.dropWhile isSpace 
+            . head 
+            . Char8.lines 
+            . Char8.dropWhile isSpace 
 
 type URL = String
 
@@ -134,17 +131,25 @@ type AbsoluteFolderPath = FilePath
 type FileToDownload = (URL,FileName)
 
 fileTreeFromCourses :: [Course] -> Tree ([FileToDownload],FolderName)
-fileTreeFromCourses cs    = Node ([],".") 
-                                 (map fileTreeFromCourse cs)
+fileTreeFromCourses courses     = node []
+                                       "." 
+                                       (fileTreeFromCourse <$> courses)
     where
-    fileTreeFromCourse c  = Node ([],nospaces (title c)) 
-                                 (map fileTreeFromLecture (lectures c)) 
-    fileTreeFromLecture l = Node (map fileAndRel (videoURLs l), nospaces (lectureName l)) 
-                                 []
-    fileAndRel relurl     =  (relurl,takeFileName relurl)
+    fileTreeFromCourse course   = node []
+                                       (nospaces (title course)) 
+                                       (fileTreeFromLecture <$> lectures course) 
+    fileTreeFromLecture lecture = node (fileFromUrl <$> videoURLs lecture)
+                                       (nospaces (lectureName lecture)) 
+                                       []
+    node a b c = Node (a,b) c
+    fileFromUrl url = (url,takeFileName url)
+
+nospaces :: Char8.ByteString -> FilePath
+nospaces = Char8.unpack . Char8.intercalate "_" . Char8.split ' '
 
 absolutize :: FilePath -> Tree (env,FolderName) -> Tree (env,AbsoluteFolderPath)
-absolutize basepath = fmap (liftA2 (,) getEnv getAbsolute) . inherit where
+absolutize basepath tree = (\xs -> (getEnv xs, getAbsolute xs)) <$> inherit tree 
+    where
     getEnv      = Data.List.NonEmpty.head
                 . fmap fst
     getAbsolute = joinPath 
@@ -193,7 +198,7 @@ download notify ((url,file),folder) = do
     where
     consume handle () bytes = Bytes.hPut handle bytes  
 
--- | Catamorphism on trees.
+-- | This function exists in the latest version of "containers"
 foldTree :: (a -> [b] -> b) -> Tree a -> b
 foldTree f = go where
     go (Node x ts) = f x (map go ts)
@@ -208,7 +213,7 @@ data Mode = Show
           | Download
 
 parseMode :: String -> Mode
-parseMode "Show"     = Show
+parseMode "show"     = Show
 parseMode "prepare"  = Prepare
 parseMode "download" = Download
 parseMode unknown = error $ "unknown mode " ++ unknown
