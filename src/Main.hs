@@ -21,8 +21,6 @@ import Control.Applicative
 import Control.Monad
 import Control.Monad.Trans.Class
 import Control.Monad.Trans.Writer
-import Control.Comonad
-import Control.Comonad.Env.Class
 import Control.Lens (view)
 import Control.Exception(throwIO,bracket_,onException)
 import qualified Data.ByteString.Lazy.Char8 as Char8
@@ -150,13 +148,13 @@ fileTreeFromCourses courses     = node []
     nospaces :: Char8.ByteString -> FolderName
     nospaces = Char8.unpack . Char8.intercalate "_" . Char8.split ' '
 
-absolute :: Comonad w => AbsoluteFolderPath -> Tree (w FolderName) -> Tree (w AbsoluteFolderPath)
-absolute basepath tree = pathFromPieces <$> inherit tree 
+absolute :: (w -> FolderName) -> AbsoluteFolderPath -> Tree w -> Tree (w,AbsoluteFolderPath)
+absolute getFolder basepath tree = pathFromPieces <$> inherit tree 
     where
-    pathFromPieces nonempty = extract nonempty $> pathFromPieces' nonempty
+    pathFromPieces nonempty = (Data.List.NonEmpty.head nonempty,pathFromPieces' nonempty)
     pathFromPieces' = joinPath 
                     . (basepath :) 
-                    . fmap extract
+                    . fmap getFolder
                     . Data.List.NonEmpty.toList 
                     . Data.List.NonEmpty.reverse
     
@@ -165,21 +163,20 @@ createFolderStructure tree = for_ folders createDirectory
     where
     folders = concat . Data.Tree.levels $ tree
     
-pruneMissing :: Comonad w => Tree (w AbsoluteFolderPath) -> IO (Maybe (Tree (w AbsoluteFolderPath)))
-pruneMissing tree = foldTree catafunc tree
+pruneMissing :: forall w. (w -> AbsoluteFolderPath) -> Tree w -> IO (Maybe (Tree w))
+pruneMissing extract' tree = foldTree catafunc tree
     where
-    catafunc :: Comonad v
-             => (v AbsoluteFolderPath)
-             -> [IO (Maybe (Tree (v AbsoluteFolderPath)))]
-             ->  IO (Maybe (Tree (v AbsoluteFolderPath))) 
+    catafunc :: w 
+             -> [IO (Maybe (Tree w))]
+             ->  IO (Maybe (Tree w)) 
     catafunc nodeinfo ts = do
-        exists <- doesDirectoryExist (extract nodeinfo)
+        exists <- doesDirectoryExist (extract' nodeinfo)
         if   exists
         then Just . Node nodeinfo <$> mconcat (fmap (fmap maybeToList) ts)
         else return Nothing
 
-flattenFiles :: Functor f => Tree ([f FileName],AbsoluteFolderPath) -> [f AbsoluteFilePath]
-flattenFiles tree = do (files,folderpath) <- toList tree
+flattenFiles :: Functor f => Tree (([f FileName],whatever),AbsoluteFolderPath) -> [f AbsoluteFilePath]
+flattenFiles tree = do ((files,_),folderpath) <- toList tree
                        file <- files
                        [(folderpath </>) <$> file]
 
@@ -242,7 +239,7 @@ main = do
     case parseResult of
         Left  err    -> print err
         Right result -> do
-            let fileTree = absolute target $ fileTreeFromCourses result
+            let fileTree = absolute snd target $ fileTreeFromCourses result
             case mode of
                 Show     -> putStrLn (drawTree (show <$> fileTree))
                 Prepare  -> do
@@ -250,7 +247,7 @@ main = do
                     putStrLn $ "writing to folder " ++ target
                     putStrLn $ "delete the sub-folders you are not interested in"
                 Download -> do
-                    files <- foldMap flattenFiles <$> pruneMissing fileTree
+                    files <- foldMap flattenFiles <$> pruneMissing snd fileTree
                     notify <- createNotifier
                     traverseThrottled 2 (download notify) files
                     return ()
