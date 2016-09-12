@@ -165,14 +165,15 @@ createFolderStructure tree = for_ folders createDirectory
     where
     folders = concat . Data.Tree.levels $ tree
     
-pruneMissing :: Tree (env,AbsoluteFolderPath) -> IO (Maybe (Tree (env,AbsoluteFolderPath)))
+pruneMissing :: Comonad w => Tree (w AbsoluteFolderPath) -> IO (Maybe (Tree (w AbsoluteFolderPath)))
 pruneMissing tree = foldTree catafunc tree
     where
-    catafunc :: (env, AbsoluteFolderPath)
-             -> [IO (Maybe (Tree (env, AbsoluteFolderPath)))]
-             -> IO (Maybe (Tree (env, AbsoluteFolderPath))) 
-    catafunc nodeinfo@(e,path) ts =  do
-        exists <- doesDirectoryExist path
+    catafunc :: Comonad v
+             => (v AbsoluteFolderPath)
+             -> [IO (Maybe (Tree (v AbsoluteFolderPath)))]
+             ->  IO (Maybe (Tree (v AbsoluteFolderPath))) 
+    catafunc nodeinfo ts = do
+        exists <- doesDirectoryExist (extract nodeinfo)
         if   exists
         then Just . Node nodeinfo <$> mconcat (fmap (fmap maybeToList) ts)
         else return Nothing
