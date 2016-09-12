@@ -69,8 +69,10 @@ data Lecture = Lecture
              , videoURLs :: [String]  
              } deriving (Show)
  
-parser :: MonadDebug m => (String -> String) -> TagParserT Char8.ByteString m [Course]
-parser unpackURL = do
+type URL = String
+
+parser :: MonadDebug m => (URL -> URL) -> TagParserT Char8.ByteString m [Course]
+parser makeAbsolute = do
     skipMany (satisfy (not . isCourseTitleOpen))
     many course 
     where
@@ -91,7 +93,7 @@ parser unpackURL = do
     lecture = do
         tagOpen "li"
         TagText (cleanupName -> lectureName) <- tagText
-        videoURLs <- fmap (fmap (unpackURL . Char8.unpack)) $ many video
+        videoURLs <- fmap (fmap (makeAbsolute . Char8.unpack)) $ many video
         tagClose "li"
         let result = Lecture {..}
         lift $ debug (Lecture' result)
@@ -120,8 +122,6 @@ parser unpackURL = do
                 . Char8.lines 
                 . Char8.dropWhile isSpace 
 
-type URL = String
-
 type FileName = FilePath
 
 type FolderName = FilePath
@@ -143,9 +143,8 @@ fileTreeFromCourses courses     = node []
                                        []
     node a b c = Node (a,b) c
     fileFromUrl url = (url,takeFileName url)
-
-nospaces :: Char8.ByteString -> FilePath
-nospaces = Char8.unpack . Char8.intercalate "_" . Char8.split ' '
+    nospaces :: Char8.ByteString -> FolderName
+    nospaces = Char8.unpack . Char8.intercalate "_" . Char8.split ' '
 
 absolute :: FilePath -> Tree (env,FolderName) -> Tree (env,AbsoluteFolderPath)
 absolute basepath tree = (\xs -> (getEnv xs, getAbsolute xs)) <$> inherit tree 
