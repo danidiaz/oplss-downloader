@@ -21,7 +21,8 @@ import Control.Applicative
 import Control.Monad
 import Control.Monad.Trans.Class
 import Control.Monad.Trans.Writer
-import Control.Lens
+import Control.Comonad
+import Control.Lens (view)
 import Control.Exception(throwIO,bracket_,onException)
 import qualified Data.ByteString.Lazy.Char8 as Char8
 --     http://hackage.haskell.org/package/bytestring
@@ -162,8 +163,8 @@ createFolderStructure tree = for_ folders createDirectory
     where
     folders = concat . Data.Tree.levels $ tree
     
-prune :: Tree (env,AbsoluteFolderPath) -> IO (Maybe (Tree (env,AbsoluteFolderPath)))
-prune tree = foldTree catafunc tree
+pruneMissing :: Tree (env,AbsoluteFolderPath) -> IO (Maybe (Tree (env,AbsoluteFolderPath)))
+pruneMissing tree = foldTree catafunc tree
     where
     catafunc :: (env, AbsoluteFolderPath)
              -> [IO (Maybe (Tree (env, AbsoluteFolderPath)))]
@@ -174,10 +175,10 @@ prune tree = foldTree catafunc tree
         then Just . Node nodeinfo <$> mconcat (fmap (fmap maybeToList) ts)
         else return Nothing
 
-flattenFiles :: Tree ([(url,FileName)],AbsoluteFolderPath) -> [(url,AbsoluteFilePath)]
+flattenFiles :: Functor f => Tree ([f FileName],AbsoluteFolderPath) -> [f AbsoluteFilePath]
 flattenFiles tree = do (files,folderpath) <- toList tree
-                       (url,file) <- files
-                       [(url, folderpath </> file)]
+                       file <- files
+                       [(folderpath </>) <$> file]
 
 traverseThrottled :: Traversable t => Int -> (a -> IO b) -> t a -> IO (t b) 
 traverseThrottled concLevel action taskContainer = do
@@ -231,7 +232,7 @@ main = do
     (parseMode -> mode) : target : [] <- getArgs
     let baseURL = "https://www.cs.uoregon.edu/research/summerschool/summer12/"
     r <- get $ baseURL ++ "curriculum.html"
-    let tags = parseTags $ r ^. responseBody
+    let tags = parseTags . view responseBody $ r 
         (parseResult, _ :: [DebugMessage]) = runWriter (runParserT (parser (baseURL++)) "" tags)
     -- print $ zip [1..] tags
     -- print $ messages
@@ -246,7 +247,7 @@ main = do
                     putStrLn $ "writing to folder " ++ target
                     putStrLn $ "delete the sub-folders you are not interested in"
                 Download -> do
-                    files <- foldMap flattenFiles <$> prune fileTree
+                    files <- foldMap flattenFiles <$> pruneMissing fileTree
                     notify <- createNotifier
                     traverseThrottled 2 (download notify) files
                     return ()

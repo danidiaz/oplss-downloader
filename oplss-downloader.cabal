@@ -29,6 +29,7 @@ executable oplss-downloader
                        lens,
                        bytestring, 
                        transformers >= 0.5,
+                       comonad >= 0.5,
                        filepath >= 1.4.0.0,
                        directory >= 1.2.6.0,
                        containers >= 0.5.7.0 
