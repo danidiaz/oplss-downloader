@@ -22,6 +22,7 @@ import Control.Monad
 import Control.Monad.Trans.Class
 import Control.Monad.Trans.Writer
 import Control.Comonad
+import Control.Comonad.Env.Class
 import Control.Lens (view)
 import Control.Exception(throwIO,bracket_,onException)
 import qualified Data.ByteString.Lazy.Char8 as Char8
@@ -70,9 +71,11 @@ data Lecture = Lecture
              , videoURLs :: [String]  
              } deriving (Show)
  
+type RelativeURL = String
+
 type URL = String
 
-parser :: MonadDebug m => (URL -> URL) -> TagParserT Char8.ByteString m [Course]
+parser :: MonadDebug m => (RelativeURL -> URL) -> TagParserT Char8.ByteString m [Course]
 parser makeAbsolute = do
     skipMany (satisfy (not . isCourseTitleOpen))
     many course 
@@ -147,16 +150,15 @@ fileTreeFromCourses courses     = node []
     nospaces :: Char8.ByteString -> FolderName
     nospaces = Char8.unpack . Char8.intercalate "_" . Char8.split ' '
 
-absolute :: AbsoluteFolderPath -> Tree (env,FolderName) -> Tree (env,AbsoluteFolderPath)
-absolute basepath tree = (\xs -> (getEnv xs, getAbsolute xs)) <$> inherit tree 
+absolute :: Comonad w => AbsoluteFolderPath -> Tree (w FolderName) -> Tree (w AbsoluteFolderPath)
+absolute basepath tree = pathFromPieces <$> inherit tree 
     where
-    getEnv      = Data.List.NonEmpty.head
-                . fmap fst
-    getAbsolute = joinPath 
-                . (basepath :) 
-                . Data.List.NonEmpty.toList 
-                . Data.List.NonEmpty.reverse
-                . fmap snd 
+    pathFromPieces nonempty = extract nonempty $> pathFromPieces' nonempty
+    pathFromPieces' = joinPath 
+                    . (basepath :) 
+                    . fmap extract
+                    . Data.List.NonEmpty.toList 
+                    . Data.List.NonEmpty.reverse
     
 createFolderStructure :: Tree (AbsoluteFolderPath) -> IO ()
 createFolderStructure tree = for_ folders createDirectory
