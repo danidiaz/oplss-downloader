@@ -68,7 +68,7 @@ data Course = Course
 data Lecture = Lecture
              {
                lectureName :: Char8.ByteString
-             , videoURLs :: [String]  
+             , videoURLs :: [URL]  
              } deriving (Show)
  
 type RelativeURL = String
