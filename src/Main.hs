@@ -146,7 +146,7 @@ fileTreeFromCourses courses     = node []
     nospaces :: Char8.ByteString -> FolderName
     nospaces = Char8.unpack . Char8.intercalate "_" . Char8.split ' '
 
-absolute :: FilePath -> Tree (env,FolderName) -> Tree (env,AbsoluteFolderPath)
+absolute :: AbsoluteFolderPath -> Tree (env,FolderName) -> Tree (env,AbsoluteFolderPath)
 absolute basepath tree = (\xs -> (getEnv xs, getAbsolute xs)) <$> inherit tree 
     where
     getEnv      = Data.List.NonEmpty.head
