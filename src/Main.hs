@@ -12,6 +12,7 @@ module Main where
 import Network.Wreq
 import Data.Functor.Identity
 import Data.Char
+import Data.Maybe
 import Data.Foldable
 import Data.Tree
 import Data.List.NonEmpty (NonEmpty(..))
@@ -68,7 +69,6 @@ data Lecture = Lecture
              , videoURLs :: [String]  
              } deriving (Show)
  
-
 parser :: MonadDebug m => (String -> String) -> TagParserT Char8.ByteString m [Course]
 parser unpackURL = do
     skipMany (satisfy (not . isCourseTitleOpen))
@@ -76,7 +76,7 @@ parser unpackURL = do
     where
     course = do
         satisfy isCourseTitleOpen
-        TagText (cleanup -> title) <- tagText
+        TagText (cleanupName -> title) <- tagText
         tagOpen "a"
         tagText
         tagClose "a"
@@ -90,7 +90,7 @@ parser unpackURL = do
         pure (Course {..})
     lecture = do
         tagOpen "li"
-        TagText (cleanup -> lectureName) <- tagText
+        TagText (cleanupName -> lectureName) <- tagText
         videoURLs <- fmap (fmap (unpackURL . Char8.unpack)) $ many video
         tagClose "li"
         let result = Lecture {..}
@@ -114,11 +114,11 @@ parser unpackURL = do
         vlink <- video
         guard (Char8.isSuffixOf "mp4" vlink)  
     skipTillVideoStart = skipMany (try (anyTag *> notFollowedBy videoStart))
-    cleanup :: Char8.ByteString -> Char8.ByteString 
-    cleanup = Char8.dropWhile isSpace 
-            . head 
-            . Char8.lines 
-            . Char8.dropWhile isSpace 
+    cleanupName :: Char8.ByteString -> Char8.ByteString 
+    cleanupName = Char8.dropWhile isSpace 
+                . head 
+                . Char8.lines 
+                . Char8.dropWhile isSpace 
 
 type URL = String
 
@@ -128,9 +128,9 @@ type FolderName = FilePath
 
 type AbsoluteFolderPath = FilePath
 
-type FileToDownload = (URL,FileName)
+type AbsoluteFilePath = FilePath
 
-fileTreeFromCourses :: [Course] -> Tree ([FileToDownload],FolderName)
+fileTreeFromCourses :: [Course] -> Tree ([(URL,FileName)],FolderName)
 fileTreeFromCourses courses     = node []
                                        "." 
                                        (fileTreeFromCourse <$> courses)
@@ -147,8 +147,8 @@ fileTreeFromCourses courses     = node []
 nospaces :: Char8.ByteString -> FilePath
 nospaces = Char8.unpack . Char8.intercalate "_" . Char8.split ' '
 
-absolutize :: FilePath -> Tree (env,FolderName) -> Tree (env,AbsoluteFolderPath)
-absolutize basepath tree = (\xs -> (getEnv xs, getAbsolute xs)) <$> inherit tree 
+absolute :: FilePath -> Tree (env,FolderName) -> Tree (env,AbsoluteFolderPath)
+absolute basepath tree = (\xs -> (getEnv xs, getAbsolute xs)) <$> inherit tree 
     where
     getEnv      = Data.List.NonEmpty.head
                 . fmap fst
@@ -163,10 +163,22 @@ createFolderStructure tree = for_ folders createDirectory
     where
     folders = concat . Data.Tree.levels $ tree
     
-files :: Tree ([a],b) -> [(a,b)]
-files tree = do (files,folder) <- toList tree
-                file <- files
-                [(file,folder)]
+prune :: Tree (env,AbsoluteFolderPath) -> IO (Maybe (Tree (env,AbsoluteFolderPath)))
+prune tree = foldTree catafunc tree
+    where
+    catafunc :: (env, AbsoluteFolderPath)
+             -> [IO (Maybe (Tree (env, AbsoluteFolderPath)))]
+             -> IO (Maybe (Tree (env, AbsoluteFolderPath))) 
+    catafunc nodeinfo@(e,path) ts =  do
+        exists <- doesDirectoryExist path
+        if   exists
+        then Just . Node nodeinfo <$> mconcat (fmap (fmap maybeToList) ts)
+        else return Nothing
+
+flattenFiles :: Tree ([(url,FileName)],AbsoluteFolderPath) -> [(url,AbsoluteFilePath)]
+flattenFiles tree = do (files,folderpath) <- toList tree
+                       (url,file) <- files
+                       [(url, folderpath </> file)]
 
 traverseThrottled :: Traversable t => Int -> (a -> IO b) -> t a -> IO (t b) 
 traverseThrottled concLevel action taskContainer = do
@@ -181,20 +193,17 @@ createNotifier = do
     latch <- newMVar ()
     return $ \msg -> withMVar latch $ \() -> putStrLn msg
 
-download :: Notifier -> ((URL,FileName),AbsoluteFolderPath) -> IO ()
-download notify ((url,file),folder) = do
-    existsFolder <- doesDirectoryExist folder
-    when existsFolder $ do -- do nothing if we deleted the sub-folder
-        let path = folder </> file
-        exists <- doesFileExist path
-        unless exists $ do
-            notify $ "starting download of file " ++ path
-            notify $ "from url " ++ url
-            do (withFile path WriteMode $ \h -> foldGet (consume h) () url) 
-               `onException`
-                    (do exists <- doesFileExist path
-                        when exists (removeFile path))
-            notify $ "ended download of file " ++ path
+download :: Notifier -> (URL,AbsoluteFilePath) -> IO ()
+download notify (url,filepath) = do
+    exists <- doesFileExist filepath
+    unless exists $ do
+        notify $ "starting download of file " ++ filepath
+        notify $ "from url " ++ url
+        do (withFile filepath WriteMode $ \h -> foldGet (consume h) () url) 
+           `onException`
+               (do exists <- doesFileExist filepath
+                   when exists (removeFile filepath))
+        notify $ "ended download of file " ++ filepath
     where
     consume handle () bytes = Bytes.hPut handle bytes  
 
@@ -230,7 +239,7 @@ main = do
     case parseResult of
         Left  err    -> print err
         Right result -> do
-            let fileTree = absolutize target $ fileTreeFromCourses result
+            let fileTree = absolute target $ fileTreeFromCourses result
             case mode of
                 Show     -> putStrLn (drawTree (show <$> fileTree))
                 Prepare  -> do
@@ -238,6 +247,7 @@ main = do
                     putStrLn $ "writing to folder " ++ target
                     putStrLn $ "delete the sub-folders you are not interested in"
                 Download -> do
+                    files <- foldMap flattenFiles <$> prune fileTree
                     notify <- createNotifier
-                    traverseThrottled 2 (download notify) (files fileTree)
+                    traverseThrottled 2 (download notify) files
                     return ()
