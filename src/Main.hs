@@ -158,7 +158,7 @@ absolute getFolder tree = pathFromPieces <$> inherit tree
                     . fmap getFolder
     
 createFolderStructure :: Tree (FolderPath) -> IO ()
-createFolderStructure tree = for_ folders createDirectory
+createFolderStructure tree = for_ folders (createDirectoryIfMissing False)
     where
     folders = concat . Data.Tree.levels $ tree
     
