@@ -146,6 +146,8 @@ fileTreeFromCourses courses     = node []
     nospaces :: Char8.ByteString -> FolderPathPiece
     nospaces = Char8.unpack . Char8.intercalate "_" . Char8.split ' '
 
+-- | Decorate each node with the full path assembled from path pieces starting
+-- from the root.
 absolute :: (w -> FolderPathPiece) -> Tree w -> Tree (w,FolderPath)
 absolute getFolder tree = pathFromPieces <$> inherit tree 
     where
@@ -177,6 +179,8 @@ flattenFiles tree = do ((files,_),folderpath) <- toList tree
                        file <- files
                        [(folderpath </>) <$> file]
 
+-- |Perform an action concurrently across a container, with a limit on the
+-- maximum number of simultaneous actions.
 traverseThrottled :: Traversable t => Int -> (a -> IO b) -> t a -> IO (t b) 
 traverseThrottled concLevel action taskContainer = do
     sem <- newQSem concLevel
@@ -190,6 +194,8 @@ createNotifier = do
     latch <- newMVar ()
     return $ \msg -> withMVar latch $ \() -> putStrLn msg
 
+-- | Downloads a file if it doesn't already exist. If an exception happens, an
+-- attempt is made to delete the partially downloaded file.
 download :: Notifier -> (URL,FilePath) -> IO ()
 download notify (url,filepath) = do
     exists <- doesFileExist filepath
@@ -204,11 +210,14 @@ download notify (url,filepath) = do
     where
     consume handle () bytes = Bytes.hPut handle bytes  
 
--- | This function exists in the latest version of "containers"
+-- | A tree catamorphism. This function already exists in the latest version of
+-- "containers"
 foldTree :: (a -> [b] -> b) -> Tree a -> b
 foldTree f = go where
     go (Node x ts) = f x (map go ts)
 
+-- | Annotate each node with the list of all its ancestors. The root node will
+-- be at the end of the list.
 inherit :: Tree a -> Tree (NonEmpty a)
 inherit tree = foldTree algebra tree [] where
     algebra :: a -> [[a] -> Tree (NonEmpty a)] -> [a] -> Tree (NonEmpty a)
@@ -231,8 +240,6 @@ main = do
     r <- get $ baseURL ++ "curriculum.html"
     let tags = parseTags . view responseBody $ r 
         (parseResult, _ :: [DebugMessage]) = runWriter (runParserT (parser (baseURL++)) "" tags)
-    -- print $ zip [1..] tags
-    -- print $ messages
     case parseResult of
         Left  err    -> print err
         Right result -> do
