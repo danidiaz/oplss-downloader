@@ -8,7 +8,7 @@ First, invoke it like
 
     oplss-downloader prepare D:\oplss2012\
 
-where the second argument is an empty folder which must exist previously. 
+where the second argument is the target folder. 
 
 A series of sub-folders will be created but no video will be downloaded. Delete
 the sub-folders of those lectures in which you are not interested.
