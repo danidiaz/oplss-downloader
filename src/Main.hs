@@ -9,7 +9,6 @@
 
 module Main where
 
-import Network.Wreq
 import Data.Functor.Identity
 import Data.Char
 import Data.Maybe
@@ -17,30 +16,31 @@ import Data.Foldable
 import Data.Tree
 import Data.List.NonEmpty (NonEmpty(..))
 import qualified Data.List.NonEmpty
+import qualified Data.ByteString.Lazy.Char8 as Char8
+--     http://hackage.haskell.org/package/bytestring
+import qualified Data.ByteString as Bytes
 import Control.Applicative
 import Control.Monad
 import Control.Monad.Trans.Class
 import Control.Monad.Trans.Writer
 import Control.Lens (view)
 import Control.Exception(throwIO,bracket_,onException)
-import qualified Data.ByteString.Lazy.Char8 as Char8
---     http://hackage.haskell.org/package/bytestring
-import qualified Data.ByteString as Bytes
+import Control.Concurrent.QSem
+import Control.Concurrent.MVar
+import Control.Concurrent.Async
+import System.IO
 import System.Environment
+--     http://hackage.haskell.org/package/directory
+import System.Directory 
+--     http://hackage.haskell.org/package/filepath
+import System.FilePath
 --     http://hackage.haskell.org/package/tagsoup 
 import Text.HTML.TagSoup
 --     http://hackage.haskell.org/package/megaparsec 
 import Text.Megaparsec hiding (satisfy)
 --     http://hackage.haskell.org/package/tagsoup-megaparsec 
 import Text.Megaparsec.TagSoup
---     http://hackage.haskell.org/package/directory
-import System.Directory 
---     http://hackage.haskell.org/package/filepath
-import System.FilePath
-import Control.Concurrent.QSem
-import Control.Concurrent.MVar
-import Control.Concurrent.Async
-import System.IO
+import Network.Wreq
 
 type TagParserT str m = ParsecT Dec [Tag str] m
 
@@ -130,10 +130,8 @@ type FolderPathPiece = FilePath
 
 type FolderPath = FilePath
 
-fileTreeFromCourses :: [Course] -> Tree ([(URL,FileName)],FolderPathPiece)
-fileTreeFromCourses courses     = node []
-                                       "." 
-                                       (fileTreeFromCourse <$> courses)
+fileTreeFromCourses :: [Course] -> Forest ([(URL,FileName)],FolderPathPiece)
+fileTreeFromCourses courses = fileTreeFromCourse <$> courses
     where
     fileTreeFromCourse course   = node []
                                        (nospaces (title course)) 
@@ -243,7 +241,7 @@ main = do
     case parseResult of
         Left  err    -> print err
         Right result -> do
-            let fileTree = absolute snd $ Node ([],target) [fileTreeFromCourses result]
+            let fileTree = absolute snd $ Node ([],target) (fileTreeFromCourses result)
             case mode of
                 Show     -> putStrLn (drawTree (show <$> fileTree))
                 Prepare  -> do
